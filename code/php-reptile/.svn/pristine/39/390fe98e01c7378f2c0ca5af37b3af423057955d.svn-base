@@ -1,0 +1,165 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: lee
+ * Date: 17/12/9
+ * Time: 下午11:46
+ */
+
+Class LoadKline
+{
+    public static function getStockKline($stock,$redis,$len)
+    {
+        $result = null;
+        $final = null;
+        $nowMin = date("Hi");
+        $nowDate = date("Y-m-d");
+        $stock = strtolower($stock);
+        $upStock = strtoupper($stock);
+        $key = $stock . "_day_0";
+
+        $ret = $redis->get($key);
+        if (!$ret)
+        {
+            $key = $stock;
+            $retStock = $redis->get($key);
+            if (!$retStock)
+            {
+                return $result;
+            }
+            else
+            {
+                $resArr = explode(",", $retStock);
+                //redis中存储的实时股价数值信息少于30
+                if (count($resArr) < 30 || $resArr[1] == "" || $resArr[1] == "0.000")
+                {
+                    return $result;
+                }
+            }
+
+            $volume = round($resArr[8], 2);
+            $open = $resArr[1];
+            $high = $resArr[4];
+            $close = $resArr[3];
+            $low = $resArr[5];
+            $chg = round($resArr[3] - $resArr[2], 2);
+            $percent = round(($resArr[3] / $resArr[2] - 1.000) * 100, 2);
+            $ma5 = $resArr[3];
+            $ma10 = $resArr[3];
+            $ma20 = $resArr[3];
+            $ma30 = $resArr[3];
+            $t = strtotime($resArr[30]);
+            $time = date("D M d 00:00:00 +0800 Y", $t);
+            //$Daytime = date("Y-m-d" . ' 00:00:00', $t);
+
+            $result = [
+                "stock" => ["symbol" => $upStock],
+                "success" => "true",
+                "chartlist" => [],
+            ];
+            $result["chartlist"][] = [
+                "volume" => $volume,
+                "amount" => $resArr[9],
+                "open" => round($open, 2),
+                "high" => round($high, 2),
+                "close" => round($close, 2),
+                "low" => round($low, 2),
+                "chg" => round($chg, 2),
+                "percent" => round($percent, 2),
+                "turnrate" => 0.00,
+                "yesClose" => round($open, 2),
+                "ma5" => round($ma5, 2),
+                "ma10" => round($ma10, 2),
+                "ma20" => round($ma20, 2),
+                "ma30" => round($ma30, 2),
+                "dif" => -1000000.00,
+                "dea" => -1000000.00,
+                "macd" => -1000000.00,
+                "time" => $time,
+                //"Daytime" => $Daytime,
+            ];
+        } else {
+            $klineArr = json_decode($ret, true);
+            $result = $klineArr;
+
+            $checkArr = end($result["chartlist"]);
+            if ($checkArr && is_array($checkArr) && array_key_exists("time", $checkArr)) {
+                $check = date("Ymd", strtotime($checkArr["time"]));
+                if ($check >= date("Ymd")) {
+                    if(is_array($result) && is_array($result["chartlist"]))
+                    {
+                        $final = array_slice($result["chartlist"], 0-$len, null, false);
+                    }
+                    return $final;
+                }
+            }
+
+            $key = $stock;
+            $retStock = $redis->get($key);
+            if (!$retStock) {
+                return $result;
+            } else {
+                $resArr = explode(",", $retStock);
+                //redis中存储的实时股价数值信息少于30
+                if (count($resArr) < 30 || $resArr[1] == "" || $resArr[1] == "0.000") {
+                    return $result;
+                }
+
+
+                if ($nowDate == $resArr[30] && $nowMin >= "0930") {
+                    $chgArr = end($result["chartlist"]);
+                    if ($chgArr && is_array($chgArr) && array_key_exists("time", $chgArr)) {
+                        $lastDay = date("Ymd", strtotime($chgArr["time"]));
+                        if ($lastDay == date("Ymd")) {
+                            array_pop($result["chartlist"]);
+                        }
+                    }
+
+                    $volume = round($resArr[8], 2);
+                    $open = $resArr[1];
+                    $high = $resArr[4];
+                    $close = $resArr[3];
+                    $low = $resArr[5];
+                    $chg = round($resArr[3] - $resArr[2], 2);
+                    $yesClose = $resArr[2];
+                    $percent = round(($resArr[3] / $resArr[2] - 1.000) * 100, 2);
+                    $ma5 = 0;
+                    $ma10 = 0;
+                    $ma20 = 0;
+                    $ma30 = 0;
+                    $t = strtotime($resArr[30]);
+                    $time = date("D M d 00:00:00 +0800 Y", $t);
+                    //$Daytime = date("Y-m-d" . ' 00:00:00', $t);
+
+                    $result["chartlist"][] = [
+                        "volume" => $volume,
+                        "amount" => $resArr[9],
+                        "open" => round($open, 2),
+                        "high" => round($high, 2),
+                        "close" => round($close, 2),
+                        "low" => round($low, 2),
+                        "chg" => round($chg, 2),
+                        "percent" => round($percent, 2),
+                        "yesClose" => round($yesClose, 2),
+                        "turnrate" => 0.00,
+                        "ma5" => round($ma5, 2),
+                        "ma10" => round($ma10, 2),
+                        "ma20" => round($ma20, 2),
+                        "ma30" => round($ma30, 2),
+                        "dif" => -1000000.00,
+                        "dea" => -1000000.00,
+                        "macd" => -1000000.00,
+                        "time" => $time,
+                        //"Daytime" => $Daytime,
+                    ];
+                    $result["chartlist"] = array_slice($result["chartlist"], 1);
+                }
+            }
+        }
+        if(is_array($result) && is_array($result["chartlist"]))
+        {
+            $final = array_slice($result["chartlist"], 0-$len, null, false);
+        }
+        return $final;
+    }
+}

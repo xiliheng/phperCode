@@ -1,0 +1,65 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: mengyuan
+ * Date: 17/12/8
+ * Time: 下午3:35
+ * explain: php run.php  getStockOutfit getOutfit
+ */
+
+include "../../lib/crawler/StockInfo.php";
+
+Class getStockOutfit
+{
+    public static function getOutfit()
+    {
+        StockInfo::getAllNewStockId("./allstocklog.txt");
+        $redis=new Redis();
+        $redis->connect('127.0.0.1',6379);
+        $redis->auth('MhxzKhl&gpb%.1112');
+        $redis->select(1);
+        $key = "stockAll";
+        $strock = $redis->get($key);
+        $arrStrock = json_decode($strock, true);
+        //var_dump($strock);
+        $redis = StockInfo::getAllRedis();
+        foreach($arrStrock as $k=>$v)
+        {
+            $link = Db::$dongcaiUrl['outfit'];
+            $code = substr($k, 2);
+            $url = str_replace('{{code}}', $code, $link);
+            $resArr = [];
+            $output = Tool::getHttpForGzip($url, 10, "", false, true);
+            sleep(4);
+            $output = trim($output, '(');
+            $output = trim($output, ')');
+            $arrOutfit = json_decode($output, true);
+            if(count($arrOutfit) > 0)
+            {
+                foreach($arrOutfit as $outfit)
+                {
+                    //$bid = $outfit['secuFullCode'];
+                    $tmpArr = [
+                        $outfit['insName'], //名称
+                        $outfit['secuFullCode'],//strock
+                        $outfit['rate'], //rate
+                        $outfit['datetime'],  //日期
+                    ];
+
+                    $resArr[] = $tmpArr;
+                }
+                $key = $code."_outfit";
+                StockInfo::insertIncrToRedis($redis, $key, $resArr);
+                $res[$code] = $resArr;
+                var_dump($res);
+
+            }
+        }
+        $k = 'allStrockOutfit';
+        if(!empty($res))
+        {
+            $redis->set($k, json_encode($res));
+        }
+    }
+
+}

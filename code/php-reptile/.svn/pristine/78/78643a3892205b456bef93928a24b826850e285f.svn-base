@@ -1,0 +1,451 @@
+<?php
+include "Tool.php";
+include "../../conf/db.conf.php";
+
+/**
+ * StockInfo model
+ *
+ */
+class StockInfo
+{
+
+	//获取redis连接
+	public static function getAllRedis()
+	{
+		$flag = Db::$runtime;
+		if($flag != "online")
+			$flag = "test";
+		$redis=new Redis();
+		$info = Db::$allRedis[$flag];
+		$redis->connect($info['host'],$info['port']);
+		$redis->auth($info['auth']);
+		$redis->select($info['index']);
+		return $redis;
+	}
+
+	//获取redis连接
+	public static function getNowRedis()
+	{
+		$flag = Db::$runtime;
+		if($flag != "online")
+			$flag = "test";
+		$redis=new Redis();
+		$info = Db::$nowRedis[$flag];
+		$redis->connect($info['host'],$info['port']);
+		$redis->auth($info['auth']);
+		$redis->select($info['index']);
+		return $redis;
+	}
+
+	//获取mysql连接
+	public static function getConnect()
+	{
+		$flag = Db::$runtime;
+		if($flag != "online")
+			$flag = "test";
+		$db = Db::$gpbzx[$flag];
+		$con=mysqli_connect($db['host'],$db['username'],
+			$db['password'],$db['database'],$db['port']);
+		// Check connection
+		if (!$con)
+		{
+			Tool::log_print("Error","Failed to connect to MySQL: " . mysqli_connect_error());
+			return null;
+		}
+		mysqli_query($con,'set names utf8');
+		return $con;
+	}
+
+	public static function insertIncrToRedis($redis, $key, $result)
+	{
+		$his = $redis->hget($key, date("Y"));
+		if(!empty($his))
+		{
+			$hisArr = json_decode($his);
+		}
+		else
+		{
+			$hisArr = [];
+		}
+		$his[date("Ymd")] = $result;
+		$redis->hSet($key, date("Y"), json_encode($his));
+	}
+
+	/*
+	以大秦铁路（股票代码：601006）为例，如果要获取它的最新行情，只需访问新浪的股票数据接口：
+	http://hq.sinajs.cn/list=sh601006
+	这个url会返回一串文本，例如：
+	var hq_str_sh601006="大秦铁路, 27.55, 27.25, 26.91, 27.55, 26.20, 26.91, 26.92, 
+	22114263, 589824680, 4695, 26.91, 57590, 26.90, 14700, 26.89, 14300,
+	26.88, 15100, 26.87, 3100, 26.92, 8900, 26.93, 14230, 26.94, 25150, 26.95, 15220, 26.96, 2008-01-11, 15:05:32";
+	这个字符串由许多数据拼接在一起，不同含义的数据用逗号隔开了，按照程序员的思路，顺序号从0开始。
+	0：”大秦铁路”，股票名字；
+	1：”27.55″，今日开盘价；
+	2：”27.25″，昨日收盘价；
+	3：”26.91″，当前价格；
+	4：”27.55″，今日最高价；
+	5：”26.20″，今日最低价；
+	6：”26.91″，竞买价，即“买一”报价；
+	7：”26.92″，竞卖价，即“卖一”报价；
+	8：”22114263″，成交的股票数，由于股票交易以一百股为基本单位，所以在使用时，通常把该值除以一百；
+	9：”589824680″，成交金额，单位为“元”，为了一目了然，通常以“万元”为成交金额的单位，所以通常把该值除以一万；
+	10：”4695″，“买一”申请4695股，即47手；
+	11：”26.91″，“买一”报价；
+	12：”57590″，“买二”
+	13：”26.90″，“买二”
+	14：”14700″，“买三”
+	15：”26.89″，“买三”
+	16：”14300″，“买四”
+	17：”26.88″，“买四”
+	18：”15100″，“买五”
+	19：”26.87″，“买五”
+	20：”3100″，“卖一”申报3100股，即31手；
+	21：”26.92″，“卖一”报价
+	(22, 23), (24, 25), (26,27), (28, 29)分别为“卖二”至“卖四的情况”
+	30：”2008-01-11″，日期；
+	31：”15:05:32″，时间；
+	*/
+
+    public static function getAllNewStockId($stockIdFile)
+    {
+		file_put_contents($stockIdFile,"");
+		$stockAll = array();
+		$url = "http://db2015.wstock.cn/wsDB_API2/stock.php?market=SH6,SH5,SH90,SZ00,SZ30,SZ20,SZ150,SH00,SZ39&query=Symbol,Name&num=10000&u=hzhfzx&p=abc123&r_type=2";
+		$output = Tool::getHttpForGzip($url, 10, "", false, true);
+		$countArr = json_decode($output,true);
+		
+		if(count($countArr) > 0)
+		{	
+			foreach($countArr as $stock)
+			{
+				$stockAllId = trim($stock["Symbol"]);
+				$name = trim($stock["Name"]);
+				$stockStr = $stockAllId."\t".$name."\t".self::getStockStatus($stockAllId)."\n";
+				$stockAll[$stockAllId] = $name;
+				file_put_contents($stockIdFile,$stockStr,FILE_APPEND);
+			}
+		}
+
+		$redis=new Redis();
+		$redis->connect('127.0.0.1',6379);
+		$redis->auth('MhxzKhl&gpb%.1112');
+		$redis->select(1);
+
+		$key = "stockAll";
+		$redis->set($key, json_encode($stockAll));
+    }
+
+	/*
+	status 板块:
+
+	1 主板A股
+	2 B股
+	3 中小板
+	4 创业板
+
+	status 市场:
+
+	1 沪市
+	2 深市
+	*/
+	public static function getStockStatus($stockId)
+	{
+		if(stripos($stockId,"Z30") == 1)
+		{
+			return "4\t2"; 
+		}
+		if(stripos($stockId,"Z002") == 1 || stripos($stockId,"Z001") == 1 || stripos($stockId,"Z15") == 1)
+		{
+			return "3\t2"; 
+		}
+		if(stripos($stockId,"H90") == 1)
+		{
+			return "2\t1"; 
+		}
+		if(stripos($stockId,"Z20") == 1)
+		{
+			return "2\t2"; 
+		}
+		if(stripos($stockId,"H60") == 1)
+		{
+			return "1\t1"; 
+		}
+		if(stripos($stockId,"H5") == 1)
+		{
+			return "1\t1"; 
+		}
+		if(stripos($stockId,"Z000") == 1)
+		{
+			return "1\t2"; 
+		}
+                if(stripos($stockId,"H00") == 1 || stripos($stockId,"Z39") == 1)
+                {
+                        return "0\t0";
+                }
+		return "5\t3";
+	}
+
+    public static function getBoardRankNew()
+    {
+		$url = "http://nufm.dfcfw.com/EM_Finance2014NumericApplication/JS.aspx?type=CT&cmd=C._BKGN&sty=FPGBKI&st=c&sr=-1&p=1&ps=5000&cb=&js=var%20BKCache=[(x)]&token=7bc05d0d4c3c22ef9fca8c2a912d779c&v=" . time();
+		$output = Tool::getHttp($url, 120, "", false);	
+		$resArr = array();
+
+		$start = strpos($output,"[\"");
+		$end = strpos($output,"\"]");
+		$output = substr($output,$start,$end-$start+1);
+		$arr = explode("\",\"",$output);
+		if(is_array($arr))
+		{
+			foreach($arr as $board)
+			{
+				$board = str_replace("[","",$board);
+				$board = str_replace("]","",$board);
+				$board = str_replace("\"","",$board);
+				$boardArr = explode(",",$board);
+				$status = self::getStatus($boardArr[7]);
+				$bpercent = $boardArr[3];
+				if($bpercent == '-')
+				{
+					$bpercent = "0.00";
+				}
+				$resArr[] = array(
+					"bid" => $boardArr[1].$boardArr[0],
+					"bname" => $boardArr[2],
+					"bpercent" => $bpercent,
+					"sid" => $status . $boardArr[7],
+					"sname" => $boardArr[9],
+					"price" => $boardArr[10],
+					"percent" => $boardArr[11]
+					);
+			}
+		}
+		return $resArr;
+    }
+
+    public static function getBoardStockNew($boardId)
+    {
+		$url = "http://nufm.dfcfw.com/EM_Finance2014NumericApplication/JS.aspx?type=CT&cmd=C.".$boardId."&sty=FCOIATA&sortType=C&sortRule=-1&page=1&pageSize=200&js=var%20quote_123%3d{rank:[(x)],pages:(pc)}&token=7bc05d0d4c3c22ef9fca8c2a912d779c&jsName=quote_123&_g=".time();
+
+		$output = Tool::getHttp($url, 120, "", false);	
+		$resArr = array();
+
+		$start = strpos($output,"[\"");
+		$end = strpos($output,"\"]");
+		$output = substr($output,$start,$end-$start+1);
+		$arr = explode("\",\"",$output);
+		if(is_array($arr))
+		{
+			foreach($arr as $board)
+			{
+				$board = str_replace("[","",$board);
+				$board = str_replace("]","",$board);
+				$board = str_replace("\"","",$board);
+				$boardArr = explode(",",$board);
+				$status = self::getStatus($boardArr[1]);
+				if($boardArr[3] == "-")
+				{
+					$resArr[] = array(
+						"id" => $status . $boardArr[1],
+						"name" => $boardArr[2],
+						"price" => $boardArr[9],
+						"percent" => "0.00",
+						"change" => "0.00"
+						);
+				}
+				else
+				{
+					$resArr[] = array(
+						"id" => $status . $boardArr[1],
+						"name" => $boardArr[2],
+						"price" => $boardArr[3],
+						"percent" => str_replace("%","",$boardArr[5]),
+						"change" => $boardArr[4]
+						);
+				}
+			}
+		}
+		return $resArr;
+    }
+
+    public static function getStockRankNew($sortType)
+    {
+		$stime = date("Y-m-d 09:30");
+		$etime = date("Y-m-d 15:10");
+		$url = "http://db2015.wstock.cn/wsDB_API2/stock.php?market=SH6,SZ00,SZ30&query=Symbol,Name,NewPrice,LastClose&u=hzhfzx&p=abc123&num=200&q_type=0&r_type=2&desc=".$sortType."&stime=".urlencode($stime)."&etime=".urlencode($etime);
+		$output = Tool::getHttpForGzip($url, 10, "", false, true);
+		$resArr = array();
+		if(strpos($output,"\"errcode\":4014") === false)
+		{
+			$output = json_decode($output,true);
+			if(is_array($output))
+			{
+				foreach($output as $arr)
+				{
+					$resArr[] = array(
+						"id" => strtolower($arr["Symbol"]),
+						"name" => $arr["Name"],
+						"price" => (float)($arr["NewPrice"]),
+						"percent" => (float)(round(($arr["NewPrice"]-$arr["LastClose"])/$arr["LastClose"],4)*100),
+						"change" => (float)(round($arr["NewPrice"]-$arr["LastClose"],3))
+						);
+				}
+			}
+		}
+		return $resArr;
+    }
+
+	public static function getStatus($stockId)
+	{
+		if(stripos($stockId,"30") === 0 || stripos($stockId,"00") === 0 ||
+			stripos($stockId,"20") === 0)
+		{
+			return "sz"; 
+		}
+		if(stripos($stockId,"90") === 0 || stripos($stockId,"60") === 0)
+		{
+			return "sh"; 
+		}
+
+		return "";
+	}
+
+	public static function countMa($redis,$type,$stock,$price,$name,$flag,$maNum)
+	{
+		$maKey = $stock . "_" . $name . "_ma" . $type;
+		$maNum = $redis->hget($maKey,"num");
+		if($maNum > 0)
+		{
+			//$redis->hset($maKey,"num",$maNum);
+			//$redis->hset($maKey,"num",1);
+			if($flag)
+			{
+				$maNum = $maNum + 1;
+			}
+		}
+		else
+		{
+			//$maNum = $redis->hget($maKey,"num") + 1;
+			$maNum = 1;
+		}
+		
+		if($maNum < $type)
+		{
+			$last = 0;
+			$ma = 0;
+			$maIndex = $maNum; 
+		}
+		else
+		{
+			$before = $maNum - $type;
+			$maLastValue = $redis->hgetall($maKey);
+			if(!$maLastValue)
+			{
+				return false;
+			}
+			if($before > 0)
+			{
+				if($flag)
+				{
+					$last = $maLastValue["ma"];
+				}
+				else
+				{
+					$last = $maLastValue["last"];
+				}
+				if($maLastValue[$before]>0 && $price>0)
+				{
+					$ma = round(($last * $type - $maLastValue[$before] + $price)/$type,3);
+				}
+				else
+				{
+					$ma = $last;
+				}
+				$maIndex = $maNum;
+				//Tool::log_print("Notice", "分钟级跟进,ma:" . $maLastValue["ma"] . ",last:" . $maLastValue["last"] . ",before:" .$maLastValue[$before].",price:".$price.",ma:" . $ma .",stock:" . $stock . ",type:" . $type);
+			}
+			else
+			{
+				$last = 0;
+				$total = 0;
+				for($i=1; $i<=$type; $i++)
+				{
+					$total += $maLastValue[$i];
+				}
+				$ma = round($total/$type,3);
+				$maIndex = $maNum;
+				//Tool::log_print("Notice", "分钟级跟进1,ma:" . $maLastValue["ma"] . ",last:" . $maLastValue["last"] . ",before:" .$maLastValue[$before].",price:".$price.",ma:" . $ma .",stock:" . $stock . ",type:" . $type);
+			}
+		}
+		$maArr = array(
+				"ma" => $ma,
+				"last" => $last, 
+				"num" => $maNum,
+			);
+		$redis->hmset($maKey,$maArr);
+		$redis->hset($maKey,$maIndex,$price);
+		if($redis->hExists($maKey, $maIndex-$type-1))
+		{
+			$redis->hdel($maKey,$maIndex-$type-1);	
+		}
+		return $ma;
+	}
+
+    public static function getGlobalInfo($runtimeFile,$cookie)
+    {
+		file_put_contents($runtimeFile,"");
+		$url = "http://hq.sinajs.cn/rn=1460020287951&list=gb_\$dji,gb_ixic,gb_\$inx,rt_hkHSI,b_NKY,b_FSSTI,b_UKX,b_DAX,b_CAC,b_FTSEMIB,hf_GC,hf_CL,DINIW";
+		$output = Tool::getHttp($url, 120, $cookie, true);
+		file_put_contents($runtimeFile,$output,FILE_APPEND);
+    }
+
+    public static function getCybzInfo($redis,$cookie)
+    {
+		$endtime = sprintf("%.0f",microtime(true)*1000);
+		$url = "http://nuff.eastmoney.com/EM_Finance2015TradeInterface/JS.ashx?id=3990062&token=beb0a0047196124721f56b0f0ff5a27c&cb=callback035046850703656673&callback=callback035046850703656673&_=" . $endtime;
+		$output = Tool::getHttp($url, 120, $cookie, false);
+		$start = strpos($output,"(");
+		$end = strpos($output,")");
+		if($start>0 && $end>0)
+		{
+			$output = substr($output,$start+1);
+			$output = substr($output,0,$end-$start-1);
+			$arr = json_decode($output,true);
+			
+			$key = "sz399006";
+			$ret = $redis->get($key);
+			$resArr = explode(",", $ret);
+
+			$resArr[1] = $arr["Value"][28];
+			$resArr[2] = $arr["Value"][34];
+			$resArr[3] = $arr["Value"][25];
+			$resArr[4] = $arr["Value"][30];
+			$resArr[5] = $arr["Value"][32];
+			$resArr[8] = $arr["Value"][31];
+			$resArr[9] = $arr["Value"][35]*100000000;
+
+			$timeArr = explode(" ",$arr["Value"][49]);
+			$resArr[30] = $timeArr[0];
+			$resArr[31] = $timeArr[1];
+			
+			$result = implode(",",$resArr);
+			$redis->set($key,$result);
+
+			$arr1 = explode(",",$result);
+			$minInfo = $arr1[3] . "," . $arr1[8] . "," . $arr1[9] . "," . $arr1[30] . "," . $arr1[31];
+			$redis->rPush($key . "_min", $minInfo);	
+			$redis->rPush($key . "_all_runtime", $minInfo);	
+		}
+    }
+
+    public static function countVolume($output)
+    {
+		$arr = json_decode($output,true);
+		foreach($arr['chartlist'] as &$s)
+		{
+			$s['volume'] = ceil($s['volume']/100);
+		}
+		$result = json_encode($arr);
+		return $result;
+    }
+}

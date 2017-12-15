@@ -1,0 +1,77 @@
+数据字典：
+
+一、getBoardStock.php
+1、板块的价格数据（全库）
+  结构：
+        string
+  key：
+        $bid_info, $bid包含行业板块、概念板块
+  value：
+        二维数组，20171208为子key
+        [
+            ...
+            20171207 => [
+                   $boardArr[2], //名称
+                   $bpercent, //涨跌幅
+                   $boardArr[4], //成交量
+                   $boardArr[5],  //换手率
+                   $boardArr[18],  //当前价格
+                   $boardArr[19], //涨跌数
+                   $boardArr[6], //涨跌股票数
+            ],
+            20171208 => [
+                   $boardArr[2], //名称
+                   $bpercent, //涨跌幅
+                   $boardArr[4], //成交量
+                   $boardArr[5],  //换手率
+                   $boardArr[18],  //当前价格
+                   $boardArr[19], //涨跌数
+                   $boardArr[6], //涨跌股票数
+            ],
+            ...
+        ]
+
+2、行业/概念板块当日数据（最新库）
+  结构：
+        string
+  key：
+        industry：行业板块
+        concept：概念板块
+  value：
+        二维数组，$bid（板块id）为子key
+        [
+            ...
+            B12345 => [
+                   $boardArr[2], //名称
+                   $bpercent, //涨跌幅
+                   $boardArr[4], //成交量
+                   $boardArr[5],  //换手率
+                   $boardArr[18],  //当前价格
+                   $boardArr[19], //涨跌数
+                   $boardArr[6], //涨跌股票数
+            ],
+            B56789 => [
+                   $boardArr[2], //名称
+                   $bpercent, //涨跌幅
+                   $boardArr[4], //成交量
+                   $boardArr[5],  //换手率
+                   $boardArr[18],  //当前价格
+                   $boardArr[19], //涨跌数
+                   $boardArr[6], //涨跌股票数
+            ],
+            ...
+        ]
+
+3、股票所属板块（全库）
+  结构：
+        string
+  key：
+        $stockId_board
+  value：
+        一维数组，$bid（板块id）为子key
+        [
+            ...
+            B12345,
+            B56789,
+            ...
+        ]

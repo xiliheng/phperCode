@@ -1,0 +1,103 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: lee
+ * Date: 17/12/9
+ * Time: 下午11:23
+ */
+include "../../lib/crawler/StockInfo.php";
+include "../../lib/LoadKline.php";
+
+Class pressHold
+{
+
+    public static $rise = 1;
+    public static $fall = 2;
+    public static $shake = 3;
+
+
+    public static function getLine()
+    {
+        $nowRedis = StockInfo::getNowRedis();
+        $stock = "sh600036";
+        $klineArr = LoadKline::getStockKline($stock,$nowRedis,60);
+        $trend = self::getTrend($klineArr);
+
+        if($trend == self::$shake)
+        {
+            $result = self::shakePH($klineArr);
+        }
+
+        if($trend == self::$fall)
+        {
+            $result = self::fallPH($klineArr);
+        }
+
+        if($trend == self::$rise)
+        {
+            $result = self::risePH($klineArr);
+        }
+
+        return $result;
+    }
+
+    public static function getTrend($arr)
+    {
+        if(empty($arr))
+        {
+            return false;
+        }
+        reset($arr);
+        $first = current($arr);
+        $end = end($arr);
+
+        $startClose = $first['close'];
+        $endClose = $end['close'];
+
+        /*
+        $high = 0;
+        $low = 0;
+        foreach($arr as $k=>$v)
+        {
+            if($v['high'] > $high)
+            {
+                $high = $v['high'];
+            }
+            if($low == 0 || $v['low'] < $low)
+            {
+                $low = $v['low'];
+            }
+        }
+        */
+
+        $trendValue = round(($endClose - $startClose)/$startClose,3);
+
+        //上涨 1 下跌 2 震荡 3
+        if($trendValue > 0.15)
+        {
+            return self::$rise;
+        }
+
+        if($trendValue < -0.15)
+        {
+            return self::$fall;
+        }
+
+        return self::$shake;
+    }
+
+    public static function shakePH($klineArr)
+    {
+
+    }
+
+    public static function fallPH($klineArr)
+    {
+
+    }
+
+    public static function risePH($klineArr)
+    {
+
+    }
+}

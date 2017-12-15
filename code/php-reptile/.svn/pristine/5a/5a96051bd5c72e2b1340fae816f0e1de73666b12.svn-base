@@ -1,0 +1,102 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: lee
+ * Date: 17/12/5
+ * Time: 下午7:35
+ */
+
+include "../../lib/crawler/StockInfo.php";
+
+Class getBoardStock
+{
+    public static function getBoard()
+    {
+        $nowRedis = StockInfo::getNowRedis();
+        $redis = StockInfo::getAllRedis();
+        $boardType = Db::$boardType;
+        foreach($boardType as $k=>$v)
+        {
+            $url = $v['board'].time();
+            $output = Tool::getHttp($url, 120, "", false);
+            $resArr = [];
+
+            $start = strpos($output,"[\"");
+            $end = strpos($output,"\"]");
+            $output = substr($output,$start,$end-$start+1);
+            $arr = explode("\",\"",$output);
+            if(is_array($arr))
+            {
+                foreach($arr as $board)
+                {
+                    $board = str_replace("[","",$board);
+                    $board = str_replace("]","",$board);
+                    $board = str_replace("\"","",$board);
+                    $boardArr = explode(",",$board);
+                    $bpercent = $boardArr[3];
+                    if($bpercent == '-')
+                    {
+                        $bpercent = "0.00";
+                    }
+                    $bid = $boardArr[1].$boardArr[0];
+                    $tmpArr = [
+                        $boardArr[2], //名称
+                        $bpercent, //涨跌幅
+                        $boardArr[4], //成交量
+                        $boardArr[5],  //换手率
+                        $boardArr[18],  //当前价格
+                        $boardArr[19], //涨跌数
+                        $boardArr[6], //涨跌股票数
+                    ];
+
+                    $resArr[$bid] = $tmpArr;
+
+                    $key = $bid."_info";
+                    StockInfo::insertIncrToRedis($redis, $key, $tmpArr);
+                }
+            }
+            $nowRedis->set($k, json_encode($resArr));
+        }
+    }
+
+    public static function getStockByBoard()
+    {
+        $nowRedis = StockInfo::getNowRedis();
+        $boardType = Db::$boardType;
+        $resArr = [];
+        foreach($boardType as $k=>$v)
+        {
+            $ret = $nowRedis->get($k);
+            if(!empty($ret))
+            {
+                $resArr = json_decode($ret);
+                foreach($resArr as $bid=>$bArr)
+                {
+                    $url = $v['stock'].$bid."&_g=0.".time();
+                    $output = Tool::getHttp($url, 120, "", false);
+
+                    $start = strpos($output,"[\"");
+                    $end = strpos($output,"\"]");
+                    $output = substr($output,$start,$end-$start+1);
+                    $arr = explode("\",\"",$output);
+                    if(is_array($arr))
+                    {
+                        foreach($arr as $stock)
+                        {
+                            $stock = str_replace("[","",$stock);
+                            $stock = str_replace("]","",$stock);
+                            $stock = str_replace("\"","",$stock);
+                            $stockArr = explode(",",$stock);
+                            $status = StockInfo::getStatus($stockArr[1]);
+                            $resArr[$status . $stockArr[1]][] = $bid;
+                        }
+                    }
+                }
+            }
+        }
+        foreach($resArr as $stock=>$ar)
+        {
+            $nowRedis->set(strtolower($stock)."_board", json_encode($ar));
+        }
+    }
+}

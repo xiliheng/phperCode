@@ -1,0 +1,113 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: lee
+ * Date: 17/12/6
+ * Time: 下午3:14
+ */
+include "../../lib/crawler/StockInfo.php";
+
+Class getFund
+{
+    public static function getBoardFund()
+    {
+        if(!StockInfo::checkRunTime("../../"))
+        {
+            exit;
+        }
+        $boardType = Db::$boardType;
+        foreach($boardType as $k=>$v)
+        {
+            $url = $boardType[$k]['fund'];
+            self::getFundByUrl($url);
+        }
+    }
+
+    public static function getStockFund()
+    {
+        if(!StockInfo::checkRunTime("../../"))
+        {
+            exit;
+        }
+        $url = Db::$dongcaiUrl['fund'];
+        $pageNum = 500;
+        for($i=1;$i<=5;$i++)
+        {
+            $url = $url . "&p=".$i."&ps=".$pageNum;
+            self::getStockFundByUrl($url);
+        }
+    }
+
+    public static function getFundByUrl($url)
+    {
+        $redis = StockInfo::getAllRedis();
+        $arr = StockInfo::dongcaiParse($url);
+        if(is_array($arr) && count($arr)>1)
+        {
+            foreach($arr as $board)
+            {
+                $board = str_replace(["[","]","\""],"",$board);
+                $boardArr = explode(",",$board);
+                $bid = $boardArr[1].$boardArr[0];
+                $tmpArr = array(
+                    $boardArr[2],  //名称
+                    $boardArr[3], //涨跌幅
+                    $boardArr[4],  //全部净流入
+                    $boardArr[5],  //全部净流入比例
+                    $boardArr[6], //超大净流入
+                    $boardArr[7], //超大净流入比例
+                    $boardArr[8],  //大净流入
+                    $boardArr[9],  //大净流入比例
+                    $boardArr[10], //中净流入
+                    $boardArr[11], //中净流入比例
+                    $boardArr[12], //小净流入
+                    $boardArr[13], //小净流入比例
+                );
+                $key = $bid."_fund";
+                StockInfo::insertIncrToRedis($redis, $key, $tmpArr);
+            }
+        }
+        else
+        {
+            $message = "获取板块或概念资金流向信息失败，程序退出。";
+            Tool::sendMessage($message);
+        }
+    }
+
+    public static function getStockFundByUrl($url)
+    {
+        $redis = StockInfo::getAllRedis();
+        $arr = StockInfo::dongcaiParse($url);
+        if(is_array($arr) && count($arr)>1)
+        {
+                foreach($arr as $board)
+                {
+                    $board = str_replace(["[","]","\""],"",$board);
+                    $boardArr = explode(",", $board);
+
+                    $stockId = StockInfo::getStatus($boardArr[1]) . $boardArr[1];
+                    $tmpArr = array(
+                        $boardArr[3],  //价格
+                        $boardArr[4],  //涨跌幅
+                        $boardArr[5], //全部净流入
+                        $boardArr[6],  //全部净流入比例
+                        $boardArr[7], //超大净流入
+                        $boardArr[8],  //超大净流入比例
+                        $boardArr[9], //大净流入
+                        $boardArr[10], //大净流入比例
+                        $boardArr[11], //中净流入
+                        $boardArr[12],  //中净流入比例
+                        $boardArr[13], //小净流入
+                        $boardArr[14],  //小净流入比例
+                    );
+                    $key = $stockId."_fund";
+                    StockInfo::insertIncrToRedis($redis, $key, $tmpArr);
+                }
+        }
+        else
+        {
+            $message = "获取股票资金流向信息失败，程序退出。";
+            Tool::sendMessage($message);
+        }
+    }
+}
